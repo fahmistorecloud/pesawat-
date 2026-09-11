@@ -920,3 +920,66 @@ document.getElementById("btn-admin-logout").onclick = () => { App.isAdmin = fals
 
 // ============ INIT ============
 drawMenuShip();
+
+// ============================================================
+// MABAR PATCH — Broadcast & Render
+// ============================================================
+setInterval(function(){
+  if(!window.MP || !MP.active) return;
+  try { if(typeof player !== "undefined") mpBroadcast(player.x, player.y, App.equippedSkin); } catch(e){}
+}, 50);
+
+let _lastB = 0;
+setInterval(function(){
+  if(!window.MP || !MP.active || !window.mpShoot) return;
+  try {
+    if(typeof playerBullets !== "undefined" && playerBullets.length > _lastB){
+      for(let i = _lastB; i < playerBullets.length; i++){
+        const b = playerBullets[i];
+        if(b && !b._mp){ b._mp = true; mpShoot(b.x, b.y, 0, b.vy || -14, "rgba(" + App.skinColors.glow + ",1)"); }
+      }
+    }
+    _lastB = (typeof playerBullets !== "undefined") ? playerBullets.length : 0;
+  } catch(e){}
+}, 30);
+
+setInterval(function(){
+  if(!window.MP || !MP.active) return;
+  try {
+    MP.enemyBulletsMP.forEach(function(b){ b.x += b.vx; b.y += b.vy; });
+    MP.enemyBulletsMP = MP.enemyBulletsMP.filter(function(b){ return b.y > -50 && b.y < canvas.height + 50; });
+    for(let i = MP.enemyBulletsMP.length - 1; i >= 0; i--){
+      const b = MP.enemyBulletsMP[i];
+      if(player.alive && Math.hypot(b.x - player.x, b.y - player.y) < 30){
+        MP.enemyBulletsMP.splice(i, 1); gameOver(); return;
+      }
+    }
+  } catch(e){}
+}, 30);
+
+// Override render biar gambar pemain lain
+if(typeof render === "function"){
+  const _old = render;
+  render = function(){
+    _old();
+    if(!window.MP || !MP.active) return;
+    const ctx = gameCtx;
+    for(const id in MP.otherPlayers){
+      const op = MP.otherPlayers[id];
+      if(!op || !op.x) continue;
+      ctx.save(); ctx.globalAlpha = 0.85;
+      drawShipWithSkin(ctx, op.x, op.y, 100, 130, SKINS[op.skin]||SKINS.default);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = "#ff66cc"; ctx.font = "bold 14px monospace"; ctx.textAlign = "center";
+      ctx.fillText(op.name||"Player", op.x, op.y - 80);
+      ctx.restore();
+    }
+    MP.enemyBulletsMP.forEach(function(b){
+      ctx.save(); ctx.shadowColor = b.color; ctx.shadowBlur = 15; ctx.fillStyle = b.color;
+      ctx.beginPath(); ctx.arc(b.x, b.y, 6, 0, Math.PI*2); ctx.fill();
+      ctx.restore();
+    });
+  };
+}
+
+console.log("[MABAR] Patch loaded ✓");

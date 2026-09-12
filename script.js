@@ -989,12 +989,93 @@ function showUserDetail(u)
       const _d = DB.deleteUser.bind(DB);
       DB.deleteUser = (u) => { _d(u); db.ref("users/"+u).remove().catch(()=>{}); };
 
-      console.log("[FB] Ready ✓");
-      if(screens.admin && screens.admin.classList.contains("active")) window.refreshAdminPanel();
-    };
-    document.body.appendChild(b);
+// ===== ADMIN ONLINE =====
+(function(){
+try {
+  var cfg = {apiKey:"AIzaSyAcgrdbjNbDT7uX6Gt-mMCVMAa_Ex4yI30",authDomain:"pesawat-tempur-29d7d.firebaseapp.com",databaseURL:"https://pesawat-tempur-29d7d-default-rtdb.asia-southeast1.firebasedatabase.app/",projectId:"pesawat-tempur-29d7d",storageBucket:"pesawat-tempur-29d7d.firebasestorage.app",messagingSenderId:"157321916918",appId:"1:157321916918:web:021b2be110b91b030b57d7"};
+  
+  var _old = window.refreshAdminPanel;
+  
+  window.refreshAdminPanel = function(){
+    if(!window._db){ if(_old) _old(); return; }
+    window._db.ref("users").once("value").then(function(s){
+      var users = s.val() || {};
+      if(Object.keys(users).length === 0){
+        var local = DB.loadUsers();
+        if(Object.keys(local).length > 0){
+          window._db.ref("users").set(local);
+          users = local;
+        }
+      }
+      renderUsers(users);
+    }).catch(function(){ if(_old) _old(); });
   };
-  document.body.appendChild(a);
+  
+  function renderUsers(users){
+    var keys = Object.keys(users);
+    var tc = 0, tg = 0;
+    keys.forEach(function(k){ tc += (users[k].coins||0); tg += (users[k].gamesPlayed||0); });
+    var e1 = document.getElementById("stat-total-users"); if(e1) e1.textContent = keys.length;
+    var e2 = document.getElementById("stat-total-coins"); if(e2) e2.textContent = tc;
+    var e3 = document.getElementById("stat-total-games"); if(e3) e3.textContent = tg;
+    var tb = document.getElementById("user-list"); if(!tb) return;
+    if(keys.length === 0){ tb.innerHTML = '<tr><td colspan="5" class="empty-state">Belum ada akun</td></tr>'; return; }
+    tb.innerHTML = "";
+    keys.forEach(function(k){
+      var u = users[k];
+      var bs = u.bestScores || {EASY:0,NORMAL:0,HARD:0};
+      var bm = Math.max(bs.EASY||0, bs.NORMAL||0, bs.HARD||0);
+      var tr = document.createElement("tr");
+      tr.innerHTML = '<td class="uname">'+k+'</td><td class="coins">'+(u.coins||0)+'</td><td>'+bm+'</td><td>'+(u.gamesPlayed||0)+'</td><td class="actions"><button class="mini-btn mini-btn-detail" data-u="'+k+'" data-act="detail">📋</button><button class="mini-btn mini-btn-edit" data-u="'+k+'" data-act="coin">🪙</button><button class="mini-btn mini-btn-add" data-u="'+k+'" data-act="addcoin">＋</button><button class="mini-btn mini-btn-del" data-u="'+k+'" data-act="del">🗑</button></td>';
+      tb.appendChild(tr);
+    });
+    tb.querySelectorAll("button[data-act]").forEach(function(b){
+      b.onclick = function(){
+        var u = b.dataset.u, act = b.dataset.act;
+        if(act === "detail" && typeof showUserDetail === "function") showUserDetail(u);
+        else if(act === "coin" && typeof openCoinModal === "function") openCoinModal(u);
+        else if(act === "addcoin" && typeof addCoins === "function") addCoins(u, 100);
+        else if(act === "del"){ if(confirm("Hapus "+u+"?")){ DB.deleteUser(u); window.refreshAdminPanel(); } }
+      };
+    });
+  }
+  
+  var s1 = document.createElement("script");
+  s1.src = "https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js";
+  s1.onload = function(){
+    var s2 = document.createElement("script");
+    s2.src = "https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js";
+    s2.onload = function(){
+      try {
+        firebase.initializeApp(cfg);
+        window._db = firebase.database();
+        
+        setTimeout(function(){
+          var local = DB.loadUsers();
+          if(Object.keys(local).length > 0){
+            window._db.ref("users").once("value").then(function(s){
+              if(!s.val() || Object.keys(s.val()||{}).length === 0){
+                window._db.ref("users").set(local);
+                console.log("[ADMIN] Sync", Object.keys(local).length, "user ✓");
+              }
+            });
+          }
+        }, 1000);
+        
+        var _c = DB.createUser.bind(DB);
+        DB.createUser = function(u,p,c){ var r = _c(u,p,c); if(r){ var usr = DB.getUser(u); if(usr) window._db.ref("users/"+u).set(usr); } return r; };
+        var _up = DB.updateUser.bind(DB);
+        DB.updateUser = function(u,up){ var r = _up(u,up); if(r){ var usr = DB.getUser(u); if(usr) window._db.ref("users/"+u).set(usr); } return r; };
+        var _d = DB.deleteUser.bind(DB);
+        DB.deleteUser = function(u){ _d(u); window._db.ref("users/"+u).remove(); };
+        
+        console.log("[ADMIN] Ready ✓");
+      } catch(e){ console.warn("[ADMIN] Error:", e.message); }
+    };
+    document.body.appendChild(s2);
+  };
+  document.body.appendChild(s1);
+} catch(e){ console.warn("[ADMIN] Fatal:", e.message); }
 })();
 // ============ INIT ============
 drawMenuShip();

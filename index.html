@@ -228,10 +228,30 @@
   <div class="admin-section">
     <h3>Daftar Akun</h3>
     <table class="user-table">
-      <thead><tr><th>User</th><th>Koin</th><th>Best</th><th>Main</th><th>Aksi</th></tr></thead>
-      <tbody id="user-list"><tr><td colspan="5" class="empty-state">Belum ada akun</td></tr></tbody>
+      <thead>
+        <tr>
+          <th>User</th>
+          <th>Koin</th>
+          <th>Best</th>
+          <th>Main</th>
+          <th>Status</th>   <!-- ⚡ BARU -->
+          <th>Aksi</th>
+        </tr>
+      </thead>
+      <tbody id="user-list">
+        <tr><td colspan="6" class="empty-state">Belum ada akun</td></tr>
+      </tbody>
     </table>
   </div>
+
+  <!-- ⚡ BARU: User Online -->
+  <div class="admin-section" style="border-color:rgba(34,204,136,.5)">
+    <h3 style="color:#22cc88">🟢 User Online</h3>
+    <div id="online-list" style="padding:10px;background:rgba(0,0,0,.25);border-radius:8px;min-height:40px;font-size:13px;color:#ccc">
+      <div class="empty-state">Tidak ada user online</div>
+    </div>
+  </div>
+
   <div class="admin-section">
     <h3>Buat Akun</h3>
     <div class="admin-row"><label>Username</label><input type="text" id="new-user" maxlength="16"></div>
@@ -270,8 +290,12 @@
 
 <div id="toast"></div>
 </div>
-<script src="script.js"></script>
+
+<!-- ⚡ URUTAN SCRIPT PENTING -->
+<script src="db-api.js"></script>       <!-- 1. DB backend wrapper -->
+<script src="script.js"></script>        <!-- 2. logika utama (pakai DB) -->
 <script type="module" src="multiplayer.js"></script>
 <script src="mabar-auto.js"></script>
+
 </body>
-</html>
+  </html>

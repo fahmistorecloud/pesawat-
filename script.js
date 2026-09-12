@@ -922,6 +922,104 @@ document.getElementById("btn-admin-logout").onclick = () => { App.isAdmin = fals
 drawMenuShip();
 
 // ============================================================
+// FIREBASE SYNC — Biar admin liat user dari HP lain
+// ============================================================
+(function(){
+  const FB_CONFIG = {
+    apiKey: "AIzaSyAcgrdbjNbDT7uX6Gt-mMCVMAa_Ex4yI30",
+    authDomain: "pesawat-tempur-29d7d.firebaseapp.com",
+    databaseURL: "https://pesawat-tempur-29d7d-default-rtdb.asia-southeast1.firebasedatabase.app/",
+    projectId: "pesawat-tempur-29d7d",
+    storageBucket: "pesawat-tempur-29d7d.firebasestorage.app",
+    messagingSenderId: "157321916918",
+    appId: "1:157321916918:web:021b2be110b91b030b57d7"
+  };
+
+  // Load Firebase Compat
+  const s1 = document.createElement("script");
+  s1.src = "https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js";
+  s1.onload = () => {
+    const s2 = document.createElement("script");
+    s2.src = "https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js";
+    s2.onload = () => {
+      firebase.initializeApp(FB_CONFIG);
+      const rtdb = firebase.database();
+
+      // Simpan fungsi asli localStorage
+      const _loadUsers = DB.loadUsers.bind(DB);
+      const _saveUsers = DB.saveUsers.bind(DB);
+
+      // Override: createUser → kirim ke Firebase juga
+      const _create = DB.createUser.bind(DB);
+      DB.createUser = function(u, p, c){
+        const r = _create(u, p, c);
+        if(r){
+          const user = DB.getUser(u);
+          if(user) rtdb.ref("users/" + u).set(user).catch(()=>{});
+        }
+        return r;
+      };
+
+      // Override: updateUser → kirim ke Firebase juga
+      const _update = DB.updateUser.bind(DB);
+      DB.updateUser = function(u, up){
+        const r = _update(u, up);
+        if(r){
+          const user = DB.getUser(u);
+          if(user) rtdb.ref("users/" + u).set(user).catch(()=>{});
+        }
+        return r;
+      };
+
+      // Override: deleteUser → hapus dari Firebase juga
+      const _delete = DB.deleteUser.bind(DB);
+      DB.deleteUser = function(u){
+        _delete(u);
+        rtdb.ref("users/" + u).remove().catch(()=>{});
+      };
+
+      // Override: admin panel baca dari Firebase
+      const _refresh = window.refreshAdminPanel;
+      window.refreshAdminPanel = function(){
+        rtdb.ref("users").once("value").then(snap => {
+          const users = snap.val() || {};
+          const keys = Object.keys(users);
+          let totalCoins = 0, totalGames = 0;
+          keys.forEach(k => { totalCoins += (users[k].coins||0); totalGames += (users[k].gamesPlayed||0); });
+          const el1 = document.getElementById("stat-total-users"); if(el1) el1.textContent = keys.length;
+          const el2 = document.getElementById("stat-total-coins"); if(el2) el2.textContent = totalCoins;
+          const el3 = document.getElementById("stat-total-games"); if(el3) el3.textContent = totalGames;
+          const tbody = document.getElementById("user-list");
+          if(!tbody) return;
+          if(keys.length === 0){ tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Belum ada akun</td></tr>'; return; }
+          tbody.innerHTML = "";
+          keys.forEach(k => {
+            const u = users[k];
+            const bs = u.bestScores || {EASY:0,NORMAL:0,HARD:0};
+            const bestMax = Math.max(bs.EASY||0, bs.NORMAL||0, bs.HARD||0);
+            const tr = document.createElement("tr");
+            tr.innerHTML = '<td class="uname">'+k+'</td><td class="coins">'+(u.coins||0)+'</td><td>'+bestMax+'</td><td>'+(u.gamesPlayed||0)+'</td><td class="actions"><button class="mini-btn mini-btn-detail" data-u="'+k+'" data-act="detail">📋</button><button class="mini-btn mini-btn-edit" data-u="'+k+'" data-act="coin">🪙</button><button class="mini-btn mini-btn-add" data-u="'+k+'" data-act="addcoin">＋</button><button class="mini-btn mini-btn-del" data-u="'+k+'" data-act="del">🗑</button></td>';
+            tbody.appendChild(tr);
+          });
+          tbody.querySelectorAll("button[data-act]").forEach(b => {
+            b.onclick = () => {
+              const u = b.dataset.u, act = b.dataset.act;
+              if(act === "detail") showUserDetail(u);
+              else if(act === "coin") openCoinModal(u);
+              else if(act === "addcoin") addCoins(u, 100);
+              else if(act === "del"){ if(confirm("Hapus akun "+u+"?")){ DB.deleteUser(u); refreshAdminPanel(); } }
+            };
+          });
+        }).catch(() => _refresh());
+      };
+
+      console.log("[FIREBASE-SYNC] Ready ✓");
+    };
+    document.body.appendChild(s2);
+  };
+  document.body.appendChild(s1);
+})();
+// ============================================================
 // MABAR PATCH — Broadcast & Render
 // ============================================================
 setInterval(function(){

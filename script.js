@@ -832,92 +832,330 @@ document.getElementById("btn-restart").onclick = () => { Audio.click(); showScre
 document.getElementById("btn-quit").onclick = () => { Audio.click(); gameRunning = false; gamePaused = false; if(rafId){ cancelAnimationFrame(rafId); rafId = null; } showScreen("menu"); updateCoinDisplay(); drawMenuShip(); };
 document.getElementById("btn-again").onclick = () => { Audio.click(); startGame(); };
 document.getElementById("btn-gomenu").onclick = () => { Audio.click(); showScreen("menu"); updateCoinDisplay(); drawMenuShip(); };
+// ============================================================
+// ==================== HELPER ================================
+// ============================================================
+function esc(str) {
+  return String(str ?? '').replace(/[&<>"']/g, s => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[s]));
+}
 
 // ============================================================
-// ==================== ADMIN PANEL ==========================
+// ================ ONLINE PRESENCE (BroadcastChannel) ========
 // ============================================================
-function refreshAdminPanel(){
+const ONLINE_TIMEOUT = 15000; // 15 detik dianggap online
+const liveUsers = {}; // { username: lastSeen }
+
+// Listener global (bukan cuma di admin — biar semua tab tahu)
+const presenceChannel = ("BroadcastChannel" in window)
+  ? new BroadcastChannel("sd_presence")
+  : null;
+
+if (presenceChannel) {
+  presenceChannel.onmessage = (e) => {
+    const d = e.data;
+    if (d && d.type === "ping" && d.user) {
+      liveUsers[d.user] = Date.now();
+    }
+    if (d && d.type === "bye" && d.user) {
+      delete liveUsers[d.user];
+    }
+    // Kalau admin panel sedang kebuka, refresh list online
+    const onlineWrap = document.getElementById("online-list");
+    if (onlineWrap) renderOnlineList();
+  };
+}
+
+// Panggil ini dari game client setiap beberapa detik:
+function startPresenceHeartbeat() {
+  if (!presenceChannel) return;
+  setInterval(() => {
+    if (App.username && App.username !== "") {
+      presenceChannel.postMessage({ type: "ping", user: App.username });
+    }
+  }, 5000);
+  // kirim sekali di awal
+  if (App.username) presenceChannel.postMessage({ type: "ping", user: App.username });
+}
+
+// Panggil ini saat user logout / tutup tab
+function stopPresenceHeartbeat() {
+  if (presenceChannel && App.username) {
+    presenceChannel.postMessage({ type: "bye", user: App.username });
+  }
+}
+window.addEventListener("beforeunload", stopPresenceHeartbeat);
+
+function isUserOnline(username) {
+  if (!username) return false;
+  const t = liveUsers[username];
+  return t && (Date.now() - t) < ONLINE_TIMEOUT;
+}
+
+function renderOnlineList() {
+  const wrap = document.getElementById("online-list");
+  if (!wrap) return;
+  const now = Date.now();
+  const online = Object.keys(liveUsers).filter(u => now - liveUsers[u] < ONLINE_TIMEOUT);
+  if (online.length === 0) {
+    wrap.innerHTML = '<div class="empty-state">Tidak ada user online</div>';
+    return;
+  }
+  wrap.innerHTML = online.map(u => '🟢 <b>' + esc(u) + '</b>').join("<br>");
+}
+
+// ============================================================
+// ==================== ADMIN PANEL ===========================
+// ============================================================
+function refreshAdminPanel() {
   const users = DB.loadUsers();
   const keys = Object.keys(users);
-  const pending = DB.getPendingTopups();
+
+  // ⚡ fix: hanya topup dengan status "pending"
+  const pending = (DB.getPendingTopups() || []).filter(t => t.status === "pending");
+
   let totalCoins = 0, totalGames = 0;
-  keys.forEach(k => { totalCoins += (users[k].coins || 0); totalGames += (users[k].gamesPlayed || 0); });
+  keys.forEach(k => {
+    totalCoins += (users[k].coins || 0);
+    totalGames += (users[k].gamesPlayed || 0);
+  });
+
   document.getElementById("stat-total-users").textContent = keys.length;
   document.getElementById("stat-total-coins").textContent = totalCoins;
   document.getElementById("stat-pending").textContent = pending.length;
   document.getElementById("stat-total-games").textContent = totalGames;
+
+  // ---------------- TOPUP REQUESTS ----------------
   const reqWrap = document.getElementById("topup-requests");
-  if(pending.length === 0){ reqWrap.innerHTML = '<div class="empty-state">Belum ada request</div>'; }
-  else {
+  if (pending.length === 0) {
+    reqWrap.innerHTML = '<div class="empty-state">Belum ada request</div>';
+  } else {
     reqWrap.innerHTML = "";
     pending.forEach(t => {
       const div = document.createElement("div");
       div.className = "topup-req";
-      div.innerHTML = '<div class="head"><span class="user">' + t.username + '</span><span class="pkg">🪙 ' + t.coins + ' — ' + t.price + '</span></div><div style="font-size:11px;color:#8a8aa0">Nama: <b style="color:#fff">' + t.senderName + '</b>' + (t.note ? ' — "' + t.note + '"' : '') + '</div><div class="actions"><button style="background:#22aa66" data-act="approve" data-id="' + t.id + '">✓ APPROVE</button><button style="background:#cc3344" data-act="reject" data-id="' + t.id + '">✗ TOLAK</button></div>';
+      div.innerHTML =
+        '<div class="head">' +
+          '<span class="user">' + esc(t.username) + '</span>' +
+          '<span class="pkg">🪙 ' + esc(t.coins) + ' — ' + esc(t.price) + '</span>' +
+        '</div>' +
+        '<div style="font-size:11px;color:#8a8aa0">Nama: <b style="color:#fff">' + esc(t.senderName) + '</b>' +
+          (t.note ? ' — "' + esc(t.note) + '"' : '') +
+        '</div>' +
+        '<div class="actions">' +
+          '<button style="background:#22aa66" data-act="approve" data-id="' + esc(t.id) + '">✓ APPROVE</button>' +
+          '<button style="background:#cc3344" data-act="reject" data-id="' + esc(t.id) + '">✗ TOLAK</button>' +
+        '</div>';
       reqWrap.appendChild(div);
     });
+
     reqWrap.querySelectorAll("button[data-act]").forEach(b => {
       b.onclick = () => {
-        const id = b.dataset.id, act = b.dataset.act;
-        if(act === "approve"){
-          const t = DB.loadTopups().find(x => x.id === id);
-          if(t){ const u = DB.getUser(t.username); if(u) DB.updateUser(t.username, { coins: (u.coins || 0) + t.coins }); DB.updateTopup(id, { status: "approved", approvedAt: Date.now() }); toast("✓ +" + t.coins + " koin ke " + t.username, "success", 3000); }
-        } else { DB.updateTopup(id, { status: "rejected", rejectedAt: Date.now() }); toast("✗ Top up ditolak", "err", 2500); }
+        const id = b.dataset.id;
+        const act = b.dataset.act;
+
+        // ⚡ fix: ambil data terbaru, cek masih pending
+        const t = DB.loadTopups().find(x => x.id === id);
+        if (!t || t.status !== "pending") {
+          toast("Request sudah diproses", "err");
+          refreshAdminPanel();
+          return;
+        }
+
+        if (act === "approve") {
+          const u = DB.getUser(t.username);
+          if (!u) {
+            toast("User tidak ditemukan", "err");
+            return;
+          }
+          DB.updateUser(t.username, { coins: (u.coins || 0) + t.coins });
+          DB.updateTopup(id, { status: "approved", approvedAt: Date.now() });
+          toast("✓ +" + t.coins + " koin ke " + t.username, "success", 3000);
+        } else {
+          DB.updateTopup(id, { status: "rejected", rejectedAt: Date.now() });
+          toast("✗ Top up ditolak", "err", 2500);
+        }
         refreshAdminPanel();
       };
     });
   }
+
+  // ---------------- USER LIST ----------------
   const tbody = document.getElementById("user-list");
-  if(keys.length === 0){ tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Belum ada akun</td></tr>'; }
-  else {
+  if (keys.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Belum ada akun</td></tr>';
+  } else {
     tbody.innerHTML = "";
     keys.forEach(k => {
       const u = users[k];
-      const bs = u.bestScores || {EASY:0,NORMAL:0,HARD:0};
+      const bs = u.bestScores || { EASY: 0, NORMAL: 0, HARD: 0 };
       const bestMax = Math.max(bs.EASY || 0, bs.NORMAL || 0, bs.HARD || 0);
+      const online = isUserOnline(k);
+
       const tr = document.createElement("tr");
-      tr.innerHTML = '<td class="uname">' + k + '</td><td class="coins">' + (u.coins || 0) + '</td><td>' + bestMax + '</td><td>' + (u.gamesPlayed || 0) + '</td><td class="actions"><button class="mini-btn mini-btn-detail" data-u="' + k + '" data-act="detail">📋</button><button class="mini-btn mini-btn-edit" data-u="' + k + '" data-act="coin">🪙</button><button class="mini-btn mini-btn-add" data-u="' + k + '" data-act="addcoin">＋</button><button class="mini-btn mini-btn-del" data-u="' + k + '" data-act="del">🗑</button></td>';
+      tr.innerHTML =
+        '<td class="uname">' + esc(k) + '</td>' +
+        '<td class="coins">' + (u.coins || 0) + '</td>' +
+        '<td>' + bestMax + '</td>' +
+        '<td>' + (u.gamesPlayed || 0) + '</td>' +
+        '<td>' + (online
+          ? '<span style="color:#22cc88">🟢 Online</span>'
+          : '<span style="color:#666">⚪ Offline</span>') + '</td>' +
+        '<td class="actions">' +
+          '<button class="mini-btn mini-btn-detail" data-u="' + esc(k) + '" data-act="detail">📋</button>' +
+          '<button class="mini-btn mini-btn-edit" data-u="' + esc(k) + '" data-act="coin">🪙</button>' +
+          '<button class="mini-btn mini-btn-add" data-u="' + esc(k) + '" data-act="addcoin">＋</button>' +
+          '<button class="mini-btn mini-btn-del" data-u="' + esc(k) + '" data-act="del">🗑</button>' +
+        '</td>';
       tbody.appendChild(tr);
     });
+
     tbody.querySelectorAll("button[data-act]").forEach(b => {
       b.onclick = () => {
         const u = b.dataset.u, act = b.dataset.act;
-        if(act === "detail") showUserDetail(u);
-        else if(act === "coin") openCoinModal(u);
-        else if(act === "addcoin") addCoins(u, 100);
-        else if(act === "del"){ if(confirm("Hapus akun " + u + "?")){ DB.deleteUser(u); refreshAdminPanel(); toast("Akun dihapus", "err"); } }
+        if (act === "detail") showUserDetail(u);
+        else if (act === "coin") openCoinModal(u);
+        else if (act === "addcoin") {
+          if (confirm("Tambah 100 koin ke " + u + "?")) addCoins(u, 100);
+        }
+        else if (act === "del") {
+          if (confirm("Hapus akun " + u + "?")) {
+            DB.deleteUser(u);
+            refreshAdminPanel();
+            toast("Akun dihapus", "err");
+          }
+        }
       };
     });
   }
+
+  // ---------------- ONLINE LIST ----------------
+  renderOnlineList();
 }
-function showUserDetail(u)
-{
-  const user = DB.getUser(u); if(!user) return;
-  const bs = user.bestScores || {EASY:0,NORMAL:0,HARD:0};
+
+// ============================================================
+// ==================== USER DETAIL ===========================
+// ============================================================
+function showUserDetail(u) {
+  const user = DB.getUser(u);
+  if (!user) return;
+  const bs = user.bestScores || { EASY: 0, NORMAL: 0, HARD: 0 };
   const owned = (user.ownedSkins || ["default"]).join(", ");
   const created = new Date(user.createdAt || Date.now()).toLocaleString("id-ID");
-  document.getElementById("detail-content").innerHTML = '<div>Username: <b>' + u + '</b></div><div>Password: <b>' + user.password + '</b></div><div>Koin: <span class="gold-val">' + (user.coins || 0) + '</span></div><div>Best EASY: <b>' + (bs.EASY || 0) + '</b></div><div>Best NORMAL: <b>' + (bs.NORMAL || 0) + '</b></div><div>Best HARD: <b>' + (bs.HARD || 0) + '</b></div><div>Total Main: <b>' + (user.gamesPlayed || 0) + '</b></div><div>Skin Dimiliki: <b>' + owned + '</b></div><div>Skin Dipakai: <b>' + (user.equippedSkin || "default") + '</b></div><div>Dibuat: <b>' + created + '</b></div>';
+  const online = isUserOnline(u);
+
+  // ⚡ fix: password di-mask
+  const pwdMasked = user.password ? "•".repeat(Math.max(user.password.length, 6)) : "-";
+
+  document.getElementById("detail-content").innerHTML =
+    '<div>Username: <b>' + esc(u) + '</b></div>' +
+    '<div>Password: <b>' + pwdMasked + '</b> <button id="btn-reveal-pwd" style="font-size:10px;padding:2px 6px">👁</button></div>' +
+    '<div>Status: <b>' + (online ? '🟢 Online' : '⚪ Offline') + '</b></div>' +
+    '<div>Koin: <span class="gold-val">' + (user.coins || 0) + '</span></div>' +
+    '<div>Best EASY: <b>' + (bs.EASY || 0) + '</b></div>' +
+    '<div>Best NORMAL: <b>' + (bs.NORMAL || 0) + '</b></div>' +
+    '<div>Best HARD: <b>' + (bs.HARD || 0) + '</b></div>' +
+    '<div>Total Main: <b>' + (user.gamesPlayed || 0) + '</b></div>' +
+    '<div>Skin Dimiliki: <b>' + esc(owned) + '</b></div>' +
+    '<div>Skin Dipakai: <b>' + esc(user.equippedSkin || "default") + '</b></div>' +
+    '<div>Dibuat: <b>' + esc(created) + '</b></div>';
+
   document.getElementById("detail-modal").classList.add("show");
+
+  // tombol reveal password
+  const btnReveal = document.getElementById("btn-reveal-pwd");
+  if (btnReveal) {
+    btnReveal.onclick = () => {
+      const el = btnReveal.parentElement.querySelector("b");
+      if (el.textContent === pwdMasked) el.textContent = user.password || "-";
+      else el.textContent = pwdMasked;
+    };
+  }
 }
-function openCoinModal(u){
-  const user = DB.getUser(u); if(!user) return;
+
+// ============================================================
+// ==================== COIN MODAL ============================
+// ============================================================
+function openCoinModal(u) {
+  const user = DB.getUser(u);
+  if (!user) return;
   document.getElementById("modal-username").value = u;
   document.getElementById("modal-coins").value = user.coins || 0;
   document.getElementById("coin-modal").classList.add("show");
 }
-function addCoins(u, amount){
-  const user = DB.getUser(u); if(!user) return;
+
+function addCoins(u, amount) {
+  const user = DB.getUser(u);
+  if (!user) { toast("User tidak ada", "err"); return; }
   DB.updateUser(u, { coins: (user.coins || 0) + amount });
   toast("✓ +" + amount + " koin ke " + u, "success");
   refreshAdminPanel();
 }
-document.getElementById("btn-modal-cancel").onclick = () => { document.getElementById("coin-modal").classList.remove("show"); };
-document.getElementById("btn-modal-save").onclick = () => { const u = document.getElementById("modal-username").value; const c = parseInt(document.getElementById("modal-coins").value) || 0; DB.updateUser(u, { coins: c }); toast("✓ Koin " + u + " diupdate jadi " + c, "success"); document.getElementById("coin-modal").classList.remove("show"); refreshAdminPanel(); };
-document.getElementById("btn-detail-close").onclick = () => { document.getElementById("detail-modal").classList.remove("show"); };
-document.getElementById("btn-create-user").onclick = () => { const u = document.getElementById("new-user").value.trim(); const p = document.getElementById("new-pass").value; const c = parseInt(document.getElementById("new-coins").value) || 0; if(u.length < 3 || p.length < 3){ toast("Username/password min 3 karakter", "err"); return; } if(!DB.createUser(u, p, c)){ toast("Username sudah ada", "err"); return; } toast("✓ Akun " + u + " dibuat dengan " + c + " koin", "success"); document.getElementById("new-user").value = ""; document.getElementById("new-pass").value = ""; document.getElementById("new-coins").value = 0; refreshAdminPanel(); };
-document.getElementById("btn-wipe-all").onclick = () => { if(confirm("⚠️ HAPUS SEMUA DATA? Nggak bisa dibalikin!")){ if(confirm("Yakin beneran? Ini terakhir!")){ localStorage.removeItem("sd_users_db"); localStorage.removeItem("sd_topup_db"); localStorage.removeItem("sd_session"); toast("Semua data dihapus!", "err", 3000); refreshAdminPanel(); } } };
-document.getElementById("btn-admin-logout").onclick = () => { App.isAdmin = false; App.username = ""; showScreen("login"); document.getElementById("login-user").value = ""; document.getElementById("login-pass").value = ""; toast("Logout admin", "", 1500); };
 
+// ============================================================
+// ==================== EVENT BINDINGS ========================
+// ============================================================
+document.getElementById("btn-modal-cancel").onclick = () => {
+  document.getElementById("coin-modal").classList.remove("show");
+};
+
+document.getElementById("btn-modal-save").onclick = () => {
+  const u = document.getElementById("modal-username").value;
+  const c = parseInt(document.getElementById("modal-coins").value) || 0;
+  if (!DB.getUser(u)) { toast("User tidak ada", "err"); return; }
+  DB.updateUser(u, { coins: c });
+  toast("✓ Koin " + u + " diupdate jadi " + c, "success");
+  document.getElementById("coin-modal").classList.remove("show");
+  refreshAdminPanel();
+};
+
+document.getElementById("btn-detail-close").onclick = () => {
+  document.getElementById("detail-modal").classList.remove("show");
+};
+
+document.getElementById("btn-create-user").onclick = () => {
+  const u = document.getElementById("new-user").value.trim();
+  const p = document.getElementById("new-pass").value;
+  const c = parseInt(document.getElementById("new-coins").value) || 0;
+  if (u.length < 3 || p.length < 3) { toast("Username/password min 3 karakter", "err"); return; }
+  if (!DB.createUser(u, p, c)) { toast("Username sudah ada", "err"); return; }
+  toast("✓ Akun " + u + " dibuat dengan " + c + " koin", "success");
+  document.getElementById("new-user").value = "";
+  document.getElementById("new-pass").value = "";
+  document.getElementById("new-coins").value = 0;
+  refreshAdminPanel();
+};
+
+document.getElementById("btn-wipe-all").onclick = () => {
+  if (confirm("⚠️ HAPUS SEMUA DATA? Nggak bisa dibalikin!")) {
+    if (confirm("Yakin beneran? Ini terakhir!")) {
+      localStorage.removeItem("sd_users_db");
+      localStorage.removeItem("sd_topup_db");
+      localStorage.removeItem("sd_session");
+      toast("Semua data dihapus!", "err", 3000);
+      refreshAdminPanel();
+    }
+  }
+};
+
+document.getElementById("btn-admin-logout").onclick = () => {
+  stopPresenceHeartbeat();
+  App.isAdmin = false;
+  App.username = "";
+  showScreen("login");
+  document.getElementById("login-user").value = "";
+  document.getElementById("login-pass").value = "";
+  toast("Logout admin", "", 1500);
+};
+
+// ============================================================
+// ==================== AUTO REFRESH ==========================
+// ============================================================
+setInterval(() => {
+  const panel = document.getElementById("admin-panel");
+  if (panel && panel.classList.contains("active")) refreshAdminPanel();
+}, 10000); // refresh tiap 10 detik
 // ============ INIT ============
 drawMenuShip();
 

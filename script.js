@@ -896,31 +896,108 @@ function showUserDetail(u)
   const bs = user.bestScores || {EASY:0,NORMAL:0,HARD:0};
   const owned = (user.ownedSkins || ["default"]).join(", ");
   const created = new Date(user.createdAt || Date.now()).toLocaleString("id-ID");
-  document.getElementById("detail-content").innerHTML = '<div>Username: <b>' + u + '</b></div><div>Password: <b>' + user.password + '</b></div><div>Koin: <span class="gold-val">' + (user.coins || 0) + '</span></div><div>Best EASY: <b>' + (bs.EASY || 0) + '</b></div><div>Best NORMAL: <b>' + (bs.NORMAL || 0) + '</b></div><div>Best HARD: <b>' + (bs.HARD || 0) + '</b></div><div>Total Main: <b>' + (user.gamesPlayed || 0) + '</b></div><div>Skin Dimiliki: <b>' + owned + '</b></div><div>Skin Dipakai: <b>' + (user.equippedSkin || "default") + '</b></div><div>Dibuat: <b>' + created + '</b></div>';
-  document.getElementById("detail-modal").classList.add("show");
-}
-function openCoinModal(u){
-  const user = DB.getUser(u); if(!user) return;
-  document.getElementById("modal-username").value = u;
-  document.getElementById("modal-coins").value = user.coins || 0;
-  document.getElementById("coin-modal").classList.add("show");
-}
-function addCoins(u, amount){
-  const user = DB.getUser(u); if(!user) return;
-  DB.updateUser(u, { coins: (user.coins || 0) + amount });
-  toast("✓ +" + amount + " koin ke " + u, "success");
-  refreshAdminPanel();
-}
-document.getElementById("btn-modal-cancel").onclick = () => { document.getElementById("coin-modal").classList.remove("show"); };
-document.getElementById("btn-modal-save").onclick = () => { const u = document.getElementById("modal-username").value; const c = parseInt(document.getElementById("modal-coins").value) || 0; DB.updateUser(u, { coins: c }); toast("✓ Koin " + u + " diupdate jadi " + c, "success"); document.getElementById("coin-modal").classList.remove("show"); refreshAdminPanel(); };
-document.getElementById("btn-detail-close").onclick = () => { document.getElementById("detail-modal").classList.remove("show"); };
-document.getElementById("btn-create-user").onclick = () => { const u = document.getElementById("new-user").value.trim(); const p = document.getElementById("new-pass").value; const c = parseInt(document.getElementById("new-coins").value) || 0; if(u.length < 3 || p.length < 3){ toast("Username/password min 3 karakter", "err"); return; } if(!DB.createUser(u, p, c)){ toast("Username sudah ada", "err"); return; } toast("✓ Akun " + u + " dibuat dengan " + c + " koin", "success"); document.getElementById("new-user").value = ""; document.getElementById("new-pass").value = ""; document.getElementById("new-coins").value = 0; refreshAdminPanel(); };
-document.getElementById("btn-wipe-all").onclick = () => { if(confirm("⚠️ HAPUS SEMUA DATA? Nggak bisa dibalikin!")){ if(confirm("Yakin beneran? Ini terakhir!")){ localStorage.removeItem("sd_users_db"); localStorage.removeItem("sd_topup_db"); localStorage.removeItem("sd_session"); toast("Semua data dihapus!", "err", 3000); refreshAdminPanel(); } } };
-document.getElementById("btn-admin-logout").onclick = () => { App.isAdmin = false; App.username = ""; showScreen("login"); document.getElementById("login-user").value = ""; document.getElementById("login-pass").value = ""; toast("Logout admin", "", 1500); };
 
+// ============================================================
+// FIREBASE SYNC - Admin panel dari server
+// ============================================================
+(function(){
+  const cfg = {
+    apiKey: "AIzaSyAcgrdbjNbDT7uX6Gt-mMCVMAa_Ex4yI30",
+    authDomain: "pesawat-tempur-29d7d.firebaseapp.com",
+    databaseURL: "https://pesawat-tempur-29d7d-default-rtdb.asia-southeast1.firebasedatabase.app/",
+    projectId: "pesawat-tempur-29d7d",
+    storageBucket: "pesawat-tempur-29d7d.firebasestorage.app",
+    messagingSenderId: "157321916918",
+    appId: "1:157321916918:web:021b2be110b91b030b57d7"
+  };
+
+  const _orig = window.refreshAdminPanel;
+  window.__fb = { ready:false, db:null };
+
+  // Override admin refresh
+  window.refreshAdminPanel = function(){
+    if(!window.__fb.ready){ _orig(); return; }
+    window.__fb.db.ref("users").once("value").then(s => {
+      const users = s.val() || {};
+      if(Object.keys(users).length === 0){
+        const local = DB.loadUsers();
+        if(Object.keys(local).length > 0){
+          window.__fb.db.ref("users").set(local).then(() => render(users = local)).catch(() => render(local));
+          return;
+        }
+      }
+      render(users);
+    }).catch(() => _orig());
+  };
+
+  function render(users){
+    const keys = Object.keys(users);
+    let c = 0, g = 0;
+    keys.forEach(k => { c += (users[k].coins||0); g += (users[k].gamesPlayed||0); });
+    const e1 = document.getElementById("stat-total-users"); if(e1) e1.textContent = keys.length;
+    const e2 = document.getElementById("stat-total-coins"); if(e2) e2.textContent = c;
+    const e3 = document.getElementById("stat-total-games"); if(e3) e3.textContent = g;
+    const tb = document.getElementById("user-list");
+    if(!tb) return;
+    if(keys.length === 0){ tb.innerHTML = '<tr><td colspan="5" class="empty-state">Belum ada akun</td></tr>'; return; }
+    tb.innerHTML = "";
+    keys.forEach(k => {
+      const u = users[k];
+      const bs = u.bestScores || {EASY:0,NORMAL:0,HARD:0};
+      const bm = Math.max(bs.EASY||0, bs.NORMAL||0, bs.HARD||0);
+      const tr = document.createElement("tr");
+      tr.innerHTML = '<td class="uname">'+k+'</td><td class="coins">'+(u.coins||0)+'</td><td>'+bm+'</td><td>'+(u.gamesPlayed||0)+'</td><td class="actions"><button class="mini-btn mini-btn-detail" data-u="'+k+'" data-act="detail">📋</button><button class="mini-btn mini-btn-edit" data-u="'+k+'" data-act="coin">🪙</button><button class="mini-btn mini-btn-add" data-u="'+k+'" data-act="addcoin">＋</button><button class="mini-btn mini-btn-del" data-u="'+k+'" data-act="del">🗑</button></td>';
+      tb.appendChild(tr);
+    });
+    tb.querySelectorAll("button[data-act]").forEach(b => {
+      b.onclick = () => {
+        const u = b.dataset.u, act = b.dataset.act;
+        if(act === "detail") showUserDetail(u);
+        else if(act === "coin") openCoinModal(u);
+        else if(act === "addcoin") addCoins(u, 100);
+        else if(act === "del"){ if(confirm("Hapus akun "+u+"?")){ DB.deleteUser(u); window.refreshAdminPanel(); } }
+      };
+    });
+  }
+
+  // Load Firebase
+  const a = document.createElement("script");
+  a.src = "https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js";
+  a.onload = () => {
+    const b = document.createElement("script");
+    b.src = "https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js";
+    b.onload = () => {
+      firebase.initializeApp(cfg);
+      const db = firebase.database();
+      window.__fb.db = db;
+      window.__fb.ready = true;
+
+      // AUTO SYNC user lama ke Firebase (kalau Firebase kosong)
+      db.ref("users").once("value").then(s => {
+        const fb = s.val() || {};
+        const local = DB.loadUsers();
+        if(Object.keys(fb).length === 0 && Object.keys(local).length > 0){
+          db.ref("users").set(local).then(() => console.log("[FB] Auto-sync OK:", Object.keys(local).length, "user"));
+        }
+      });
+
+      // Override create/update/delete → sync ke Firebase
+      const _c = DB.createUser.bind(DB);
+      DB.createUser = (u,p,c) => { const r = _c(u,p,c); if(r){ const user = DB.getUser(u); if(user) db.ref("users/"+u).set(user).catch(()=>{}); } return r; };
+      const _up = DB.updateUser.bind(DB);
+      DB.updateUser = (u,up) => { const r = _up(u,up); if(r){ const user = DB.getUser(u); if(user) db.ref("users/"+u).set(user).catch(()=>{}); } return r; };
+      const _d = DB.deleteUser.bind(DB);
+      DB.deleteUser = (u) => { _d(u); db.ref("users/"+u).remove().catch(()=>{}); };
+
+      console.log("[FB] Ready ✓");
+      if(screens.admin && screens.admin.classList.contains("active")) window.refreshAdminPanel();
+    };
+    document.body.appendChild(b);
+  };
+  document.body.appendChild(a);
+})();
 // ============ INIT ============
 drawMenuShip();
-
 // ============================================================
 // FIREBASE SYNC — Biar admin liat user dari HP lain
 // ============================================================
